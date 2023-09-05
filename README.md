@@ -188,6 +188,7 @@ openllm query 'What are large language models?'
 
 > [!NOTE]
 > To use the official Llama 2 models, you must gain access by visiting
+> For anyone who might become lost or confused, HF is a mechanism that facilitates access to Llama 2 on Hugging Face after you've been granted access by Meta. The process usually takes about 1-2 days to gain access to those models. Furthermore, each user has the ability to modify the repository by downloading it to their personal laptop and establishing a path to their downloaded model if necessary.
 > the [Meta AI website](https://ai.meta.com/resources/models-and-libraries/llama-downloads/) and
 > accepting its license terms and acceptable use policy. You also need to obtain access to these
 > models on [Hugging Face](https://huggingface.co/meta-llama). Note that any Llama 2 variants can
@@ -204,6 +205,9 @@ You can specify any of the following Llama models by using `--model-id`.
 - [meta-llama/Llama-2-70b-hf](https://huggingface.co/meta-llama/Llama-2-70b-hf)
 - [meta-llama/Llama-2-13b-hf](https://huggingface.co/meta-llama/Llama-2-13b-hf)
 - [meta-llama/Llama-2-7b-hf](https://huggingface.co/meta-llama/Llama-2-7b-hf)
+- [meta-llama/Llama-2-7b](https://huggingface.co/meta-llama/Llama-2-7b)
+- [meta-llama/Llama-2-13b](https://huggingface.co/meta-llama/Llama-2-13b)
+- [meta-llama/Llama-2-70b](https://huggingface.co/meta-llama/Llama-2-70b)
 - [NousResearch/llama-2-70b-chat-hf](https://huggingface.co/NousResearch/llama-2-70b-chat-hf)
 - [NousResearch/llama-2-13b-chat-hf](https://huggingface.co/NousResearch/llama-2-13b-chat-hf)
 - [NousResearch/llama-2-7b-chat-hf](https://huggingface.co/NousResearch/llama-2-7b-chat-hf)
