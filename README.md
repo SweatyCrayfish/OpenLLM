@@ -516,9 +516,13 @@ openllm query 'What are large language models?'
 
 You can specify any of the following MPT models by using `--model-id`.
 
+
 - [mosaicml/mpt-7b](https://huggingface.co/mosaicml/mpt-7b)
+- [mosaicml/mpt-7b-8k](https://huggingface.co/mosaicml/mpt-7b-8k)
 - [mosaicml/mpt-7b-instruct](https://huggingface.co/mosaicml/mpt-7b-instruct)
+- [mosaicml/mpt-7b-8k-instruct](mosaicml/mpt-7b-8k-instruct)
 - [mosaicml/mpt-7b-chat](https://huggingface.co/mosaicml/mpt-7b-chat)
+- [mosaicml/mpt-7b-8k-chat](mosaicml/mpt-7b-8k-chat)
 - [mosaicml/mpt-7b-storywriter](https://huggingface.co/mosaicml/mpt-7b-storywriter)
 - [mosaicml/mpt-30b](https://huggingface.co/mosaicml/mpt-30b)
 - [mosaicml/mpt-30b-instruct](https://huggingface.co/mosaicml/mpt-30b-instruct)
