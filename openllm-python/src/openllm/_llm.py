@@ -1,6 +1,7 @@
 # mypy: disable-error-code="name-defined,attr-defined"
 from __future__ import annotations
 import abc
+import asyncio
 import gc
 import inspect
 import logging
@@ -22,6 +23,7 @@ import openllm_core
 from bentoml._internal.models.model import ModelSignature
 from openllm_core._configuration import FineTuneConfig
 from openllm_core._configuration import LLMConfig
+from openllm_core._prompt import process_prompt
 from openllm_core._schema import EmbeddingsOutput
 from openllm_core._typing_compat import AdaptersMapping
 from openllm_core._typing_compat import AdaptersTuple
@@ -46,7 +48,7 @@ from openllm_core.utils import ReprMixin
 from openllm_core.utils import apply
 from openllm_core.utils import bentoml_cattr
 from openllm_core.utils import codegen
-from openllm_core.utils import device_count
+from openllm_core.utils import ensure_exec_coro
 from openllm_core.utils import first_not_none
 from openllm_core.utils import generate_hash_from_file
 from openllm_core.utils import is_peft_available
@@ -58,7 +60,6 @@ from openllm_core.utils import validate_is_path
 from ._assign import make_llm_attributes
 from ._quantisation import infer_quantisation_config
 from .exceptions import ForbiddenAttributeError
-from .exceptions import GpuNotAvailableError
 from .exceptions import OpenLLMException
 from .utils import infer_auto_class
 
@@ -67,6 +68,7 @@ if t.TYPE_CHECKING:
   import peft
   import torch
   import transformers
+  import vllm
 
   from openllm_core._configuration import PeftType
   from openllm_core.utils.representation import ReprArgs
@@ -281,8 +283,8 @@ class LLM(LLMInterface[M, T], ReprMixin):
 
     def __attrs_init__(self,
                        config: LLMConfig,
-                       quantize: t.Optional[LiteralQuantise],
                        quantization_config: t.Optional[t.Union[transformers.BitsAndBytesConfig, transformers.GPTQConfig]],
+                       quantize: t.Optional[LiteralQuantise],
                        model_id: str,
                        model_decls: TupleAny,
                        model_attrs: DictStrAny,
@@ -444,10 +446,8 @@ class LLM(LLMInterface[M, T], ReprMixin):
       raise ValueError("'quantization_config' and 'quantize' are mutually exclusive. Either customise your quantization_config or use the 'quantize' argument.")
     if quantization_config is None and quantize is not None:
       # in case users input `tokenizer` to __init__, default to the _model_id
-      _gptq_tokenizer = attrs.pop('tokenizer', _model_id)
-      quantization_config, attrs = infer_quantisation_config(cls, quantize, tokenizer=_gptq_tokenizer, **attrs)
-    if quantize == 'gptq': serialisation = 'safetensors'
-    elif cls.__llm_backend__ == 'vllm': serialisation = 'legacy'  # Currently working-in-progress
+      if quantize == 'gptq': attrs.setdefault('tokenizer', _model_id)
+      quantization_config, attrs = infer_quantisation_config(cls, quantize, **attrs)
 
     # NOTE: LoRA adapter setup
     if adapter_map and adapter_id:
@@ -534,12 +534,12 @@ class LLM(LLMInterface[M, T], ReprMixin):
                model_id: str,
                llm_config: LLMConfig,
                quantization_config: transformers.BitsAndBytesConfig | transformers.GPTQConfig | None,
-               _adapters_mapping: AdaptersMapping | None,
-               _tag: bentoml.Tag,
                _quantize: LiteralQuantise | None,
                _model_version: str,
+               _tag: bentoml.Tag,
                _serialisation: t.Literal['safetensors', 'legacy'],
                _local: bool,
+               _adapters_mapping: AdaptersMapping | None,
                **attrs: t.Any,
                ):
     '''Initialize the LLM with given pretrained model.
@@ -744,16 +744,13 @@ class LLM(LLMInterface[M, T], ReprMixin):
 
   @property
   def model(self) -> M:
-    # Run check for GPU
-    if self.config['requires_gpu'] and device_count() < 1:
-      raise GpuNotAvailableError(f'{self} only supports running with GPU (None available).') from None
     # NOTE: the signature of load_model here is the wrapper under _wrapped_load_model
     if self.__llm_model__ is None:
       model = self.load_model(*self._model_decls, **self._model_attrs)
       # If OOM, then it is probably you don't have enough VRAM to run this model.
       if self.__llm_backend__ == 'pt' and is_torch_available():
         loaded_in_kbit = getattr(model, 'is_loaded_in_8bit', False) or getattr(model, 'is_loaded_in_4bit', False) or getattr(model, 'is_quantized', False)
-        if torch.cuda.is_available() and torch.cuda.device_count() == 1 and not loaded_in_kbit:
+        if torch.cuda.is_available() and torch.cuda.device_count() == 1 and not loaded_in_kbit and not isinstance(model, transformers.Pipeline):
           try:
             model = model.to('cuda')
           except Exception as err:
@@ -941,6 +938,16 @@ class LLM(LLMInterface[M, T], ReprMixin):
     prompt, generate_kwargs, postprocess_kwargs = self.sanitize_parameters(prompt, **attrs)
     return self.postprocess_generate(prompt, self.generate(prompt, **generate_kwargs), **postprocess_kwargs)
 
+  def generate_one(self, prompt: str, stop: list[str], **preprocess_generate_kwds: t.Any) -> list[dict[t.Literal['generated_text'], str]]:
+    max_new_tokens, encoded_inputs = preprocess_generate_kwds.pop('max_new_tokens', 200), self.tokenizer(prompt, return_tensors='pt').to(self.device)
+    src_len, stopping_criteria = encoded_inputs['input_ids'].shape[1], preprocess_generate_kwds.pop('stopping_criteria', openllm.StoppingCriteriaList([]))
+    stopping_criteria.append(openllm.StopSequenceCriteria(stop, self.tokenizer))
+    result = self.tokenizer.decode(self.model.generate(encoded_inputs['input_ids'], max_new_tokens=max_new_tokens, stopping_criteria=stopping_criteria)[0].tolist()[src_len:])
+    # Inference API returns the stop sequence
+    for stop_seq in stop:
+      if result.endswith(stop_seq): result = result[:-len(stop_seq)]
+    return [{'generated_text': result}]
+
   def generate(self, prompt: str, **attrs: t.Any) -> t.List[t.Any]:
     # TODO: support different generation strategies, similar to self.model.generate
     for it in self.generate_iterator(prompt, **attrs):
@@ -963,92 +970,90 @@ class LLM(LLMInterface[M, T], ReprMixin):
     from ._generation import prepare_logits_processor
 
     len_prompt = len(prompt)
+    config = self.config.model_construct_env(**attrs)
     if stop_token_ids is None: stop_token_ids = []
     stop_token_ids.append(self.tokenizer.eos_token_id)
 
-    logits_processor = prepare_logits_processor(self.config)
+    logits_processor = prepare_logits_processor(config)
 
-    input_ids = self.tokenizer(prompt).input_ids
+    with torch.inference_mode():
+      input_ids = self.tokenizer(prompt).input_ids
 
-    if context_length is None: context_length = get_context_length(self.model.config)
-    max_src_len = context_length - self.config['max_new_tokens'] - 1
+      if context_length is None: context_length = get_context_length(self.model.config)
+      max_src_len = context_length - config['max_new_tokens'] - 1
 
-    input_ids = input_ids[-max_src_len:]
-    output_ids = list(input_ids)
-    input_echo_len = len(input_ids)
+      input_ids = input_ids[-max_src_len:]
+      output_ids = list(input_ids)
+      input_echo_len = len(input_ids)
 
-    past_key_values = out = token = None
-    for i in range(self.config['max_new_tokens']):
-      torch.cuda.synchronize()
-      if i == 0:  # prefill
-        out = self.model(torch.as_tensor([input_ids]), use_cache=True)
+      past_key_values = out = token = None
+      finish_reason = None
+      for i in range(config['max_new_tokens']):
+        torch.cuda.synchronize()
+        if i == 0:  # prefill
+          out = self.model(torch.as_tensor([input_ids], device=self.device), use_cache=True)
+        else:  # decoding
+          out = self.model(torch.as_tensor([[token]], device=self.device), use_cache=True, past_key_values=past_key_values)
         logits = out.logits
         past_key_values = out.past_key_values
-      else:  # decoding
-        out = self.model(input_ids=torch.as_tensor([[token]]), use_cache=True, past_key_values=past_key_values)
-        logits = out.logits
-        past_key_values = out.past_key_values
+        torch.cuda.synchronize()
 
-      if logits_processor:
-        if self.config['repetition_penalty'] > 1.0:
-          tmp_output_ids: t.Any = torch.as_tensor([output_ids], device=logits.device)
+        if logits_processor:
+          if config['repetition_penalty'] > 1.0:
+            tmp_output_ids: t.Any = torch.as_tensor([output_ids], device=self.device)
+          else:
+            tmp_output_ids = None
+          last_token_logits = logits_processor(tmp_output_ids, logits[:, -1, :])[0]
         else:
-          tmp_output_ids = None
-        last_token_logits = logits_processor(tmp_output_ids, logits[:, -1, :])[0]
-      else:
-        last_token_logits = logits[0, -1, :]
+          last_token_logits = logits[0, -1, :]
 
-      # Switch to CPU by avoiding some bugs in mps backend.
-      if self.device.type == 'mps': last_token_logits = last_token_logits.float().to('cpu')
+        # Switch to CPU by avoiding some bugs in mps backend.
+        if self.device.type == 'mps': last_token_logits = last_token_logits.float().to('cpu')
 
-      if self.config['temperature'] < 1e-5 or self.config['top_p'] < 1e-8:
-        token = int(torch.argmax(last_token_logits))  # greedy
-      else:
-        probs = torch.softmax(last_token_logits, dim=-1)
-        token = int(torch.multinomial(probs, num_samples=1))
-      output_ids.append(token)
-      torch.cuda.synchronize()
-
-      if token in stop_token_ids: stopped = True
-      else: stopped = False
-
-      # Yield the output tokens
-      if i % stream_interval == 0 or i == self.config['max_new_tokens'] - 1 or stopped:
-        if echo:
-          tmp_output_ids = output_ids
-          rfind_start = len_prompt
+        if config['temperature'] < 1e-5 or config['top_p'] < 1e-8:
+          token = int(torch.argmax(last_token_logits))  # greedy
         else:
-          tmp_output_ids = output_ids[input_echo_len:]
-          rfind_start = 0
-        output = self.tokenizer.decode(tmp_output_ids, skip_special_tokens=True, spaces_between_special_tokens=False, clean_up_tokenization_spaces=True)
+          probs = torch.softmax(last_token_logits, dim=-1)
+          indices = torch.multinomial(probs, num_samples=2)
+          token = int(indices.tolist()[0])
+        output_ids.append(token)
 
-        partially_stopped = False
-        if stop:
-          if isinstance(stop, str):
-            pos = output.rfind(stop, rfind_start)
-            if pos != -1: output, stopped = output[:pos], True
-            else: partially_stopped = is_partial_stop(output, stop)
-          elif isinstance(stop, t.Iterable):
-            for each_stop in stop:
-              pos = output.rfind(each_stop, rfind_start)
-              if pos != -1:
-                output, stopped = output[:pos], True
-                break
-              else:
-                partially_stopped = is_partial_stop(output, each_stop)
-                if partially_stopped: break
-          else: raise ValueError('Invalid stop field type.')
+        stopped = token in stop_token_ids
 
-        # Prevent yielding partial stop sequence
-        if not partially_stopped:
-          yield {'text': output, 'usage': {'prompt_tokens': input_echo_len, 'completion_tokens': i, 'total_tokens': input_echo_len + i}, 'finish_reason': None}
-      if stopped: break
+        # Yield the output tokens
+        if i % stream_interval == 0 or i == config['max_new_tokens'] - 1 or stopped:
+          if echo:
+            tmp_output_ids = output_ids
+            rfind_start = len_prompt
+          else:
+            tmp_output_ids = output_ids[input_echo_len:]
+            rfind_start = 0
+          output = self.tokenizer.decode(tmp_output_ids, skip_special_tokens=True, spaces_between_special_tokens=False, clean_up_tokenization_spaces=True)
 
-    # Finish stream event, which contains finish reason
-    if i == self.config['max_new_tokens'] - 1: finish_reason = 'length'
-    elif stopped: finish_reason = 'stop'
-    else: finish_reason = None
-    yield {'text': output, 'usage': {'prompt_tokens': input_echo_len, 'completion_tokens': i, 'total_tokens': input_echo_len + i}, 'finish_reason': finish_reason}
+          partially_stopped = False
+          if stop:
+            if isinstance(stop, str):
+              pos = output.rfind(stop, rfind_start)
+              if pos != -1: output, stopped = output[:pos], True
+              else: partially_stopped = is_partial_stop(output, stop)
+            elif isinstance(stop, t.Iterable):
+              for each_stop in stop:
+                pos = output.rfind(each_stop, rfind_start)
+                if pos != -1:
+                  output, stopped = output[:pos], True
+                  break
+                else:
+                  partially_stopped = is_partial_stop(output, each_stop)
+                  if partially_stopped: break
+            else: raise ValueError('Invalid stop field type.')
+
+          # Prevent yielding partial stop sequence
+          if not partially_stopped:
+            yield {'text': output, 'usage': {'prompt_tokens': input_echo_len, 'completion_tokens': i, 'total_tokens': input_echo_len + i}, 'finish_reason': None}
+        if stopped: break
+      else: finish_reason = 'length'  # finish stream events
+      if stopped: finish_reason = 'stop'
+      yield {'text': output, 'usage': {'prompt_tokens': input_echo_len, 'completion_tokens': i, 'total_tokens': input_echo_len + i}, 'finish_reason': finish_reason}
     # Clean
     del past_key_values, out
     gc.collect()
@@ -1184,7 +1189,6 @@ def llm_runnable_class(self: LLM[M, T], embeddings_sig: ModelSignature, generate
     def generate(__self: _Runnable, prompt: str, **attrs: t.Any) -> list[t.Any]:
       adapter_name = attrs.pop('adapter_name', None)
       if adapter_name is not None: __self.set_adapter(adapter_name)
-      if __self.backend == 'vllm': attrs.setdefault('request_id', openllm_core.utils.gen_random_uuid())
       return self.generate(prompt, **attrs)
 
     @bentoml.Runnable.method(**method_signature(generate_sig))  # type: ignore
@@ -1199,8 +1203,7 @@ def llm_runnable_class(self: LLM[M, T], embeddings_sig: ModelSignature, generate
       if adapter_name is not None: __self.set_adapter(adapter_name)
       pre = 0
       for outputs in self.generate_iterator(prompt, request_id=openllm_core.utils.gen_random_uuid(), **attrs):
-        output_text = outputs['text'][0] if __self.backend == 'vllm' else outputs['text']
-        output_text = output_text.strip().split(' ')
+        output_text = outputs['text'].strip().split(' ')
         now = len(output_text) - 1
         if now > pre:
           yield ' '.join(output_text[pre:now]) + ' '
@@ -1208,13 +1211,81 @@ def llm_runnable_class(self: LLM[M, T], embeddings_sig: ModelSignature, generate
       yield ' '.join(output_text[pre:]) + ' '
       return ' '.join(output_text) + ' '
 
-  return types.new_class(
-      self.__class__.__name__ + 'Runnable', (_Runnable,), {},
-      lambda ns: ns.update({
-          'SUPPORTED_RESOURCES': ('nvidia.com/gpu', 'amd.com/gpu') if self.config['requires_gpu'] else ('nvidia.com/gpu', 'amd.com/gpu', 'cpu'),
-          '__module__': self.__module__,
-          '__doc__': self.config['env'].start_docstring
-      }))
+    @bentoml.Runnable.method(**method_signature(generate_sig))  # type: ignore
+    def vllm_generate(__self: _Runnable, prompt: str, **attrs: t.Any) -> list[t.Any]:
+      stop: str | t.Iterable[str] | None = attrs.pop('stop', None)
+      stop_token_ids: list[int] | None = attrs.pop('stop_token_ids', None)
+      adapter_name = attrs.pop('adapter_name', None)
+      if adapter_name is not None: __self.set_adapter(adapter_name)
+      request_id: str | None = attrs.pop('request_id', None)
+      if request_id is None: raise ValueError('request_id must not be None.')
+
+      if stop_token_ids is None: stop_token_ids = []
+      stop_token_ids.append(self.tokenizer.eos_token_id)
+      stop_: set[str] = set()
+      if isinstance(stop, str) and stop != '': stop_.add(stop)
+      elif isinstance(stop, list) and stop != []: stop_.update(stop)
+      for tid in stop_token_ids:
+        if tid: stop_.add(self.tokenizer.decode(tid))
+
+      if self.config['temperature'] <= 1e-5: top_p = 1.0
+      else: top_p = self.config['top_p']
+      config = self.config.model_construct_env(stop=list(stop_), top_p=top_p, **attrs)
+      sampling_params = config.to_sampling_config()
+
+      async def loop() -> list[str]:
+        async for request_output in t.cast('vllm.AsyncLLMEngine', self.model).generate(prompt=prompt, sampling_params=sampling_params, request_id=request_id):
+          pass
+        return [output.text for output in request_output.outputs]
+
+      try:
+        return asyncio.run(loop())
+      except RuntimeError:
+        try:
+          return ensure_exec_coro(loop())
+        except Exception:
+          raise
+
+    @bentoml.Runnable.method(**method_signature(generate_iterator_sig))  # type: ignore
+    async def vllm_generate_iterator(__self: _Runnable, prompt: str, **attrs: t.Any) -> t.AsyncGenerator[str, None]:
+      # TODO: System prompt support
+      pre = 0
+      prompt = process_prompt(prompt, None, False)
+      echo = attrs.pop('echo', False)
+      stop: str | t.Iterable[str] | None = attrs.pop('stop', None)
+      stop_token_ids: list[int] | None = attrs.pop('stop_token_ids', None)
+      adapter_name = attrs.pop('adapter_name', None)
+      if adapter_name is not None: __self.set_adapter(adapter_name)
+      request_id: str | None = attrs.pop('request_id', None)
+      if request_id is None: raise ValueError('request_id must not be None.')
+
+      if stop_token_ids is None: stop_token_ids = []
+      stop_token_ids.append(self.tokenizer.eos_token_id)
+      stop_: set[str] = set()
+      if isinstance(stop, str) and stop != '': stop_.add(stop)
+      elif isinstance(stop, list) and stop != []: stop_.update(stop)
+      for tid in stop_token_ids:
+        if tid: stop_.add(self.tokenizer.decode(tid))
+
+      if self.config['temperature'] <= 1e-5: top_p = 1.0
+      else: top_p = self.config['top_p']
+      config = self.config.model_construct_env(stop=list(stop_), top_p=top_p, **attrs)
+      sampling_params = config.to_sampling_config()
+      async for request_output in t.cast('vllm.AsyncLLMEngine', self.model).generate(prompt=prompt, sampling_params=sampling_params, request_id=request_id):
+        if echo: text_outputs = [prompt + output.text for output in request_output.outputs]
+        else: text_outputs = [output.text for output in request_output.outputs]
+        output_text = text_outputs[0]
+        output_text = output_text.strip().split(' ')
+        now = len(output_text) - 1
+        if now > pre:
+          yield ' '.join(output_text[pre:now]) + ' '
+          pre = now
+      yield ' '.join(output_text[pre:]) + ' '
+
+  return types.new_class(self.__class__.__name__ + 'Runnable', (_Runnable,), {},
+                         lambda ns: ns.update({
+                             'SUPPORTED_RESOURCES': ('nvidia.com/gpu', 'amd.com/gpu', 'cpu'), '__module__': self.__module__, '__doc__': self.config['env'].start_docstring
+                         }))
 
 def llm_runner_class(self: LLM[M, T]) -> type[LLMRunner[M, T]]:
   def available_adapters(_: LLMRunner[M, T]) -> PeftAdapterOutput:

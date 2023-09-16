@@ -18,7 +18,7 @@ Currently, ChatGLM only supports PyTorch. Make sure ``torch`` is available in yo
 
 \b
 ChatGLM Runner will use THUDM/ChatGLM-6b as the default model. To change to any other ChatGLM
-saved pretrained, or a fine-tune ChatGLM, provide ``OPENLLM_CHATGLM_MODEL_ID='thudm/chatglm-6b-int8'``
+saved pretrained, or a fine-tune ChatGLM, provide ``OPENLLM_MODEL_ID='thudm/chatglm-6b-int8'``
 or provide `--model-id` flag when running ``openllm start chatglm``:
 
 \b
@@ -44,7 +44,6 @@ class ChatGLMConfig(openllm_core.LLMConfig):
       'name_type': 'lowercase',
       'trust_remote_code': True,
       'timeout': 3600000,
-      'requires_gpu': True,
       'url': 'https://github.com/THUDM/ChatGLM-6B',
       'requirements': ['cpm-kernels', 'sentencepiece'],
       'architecture': 'ChatGLMForConditionalGeneration',

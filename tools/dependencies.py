@@ -45,7 +45,7 @@ class Classifier:
   def create_python_classifier(implementation: list[str] | None = None, supported_version: list[str] | None = None) -> list[str]:
     if supported_version is None: supported_version = ['3.8', '3.9', '3.10', '3.11', '3.12']
     if implementation is None: implementation = ['CPython', 'PyPy']
-    base = [Classifier.create_classifier('language', 'Python'), Classifier.create_classifier('language', 'Python', '3'),]
+    base = [Classifier.create_classifier('language', 'Python'), Classifier.create_classifier('language', 'Python', '3')]
     base.append(Classifier.create_classifier('language', 'Python', '3', 'Only'))
     base.extend([Classifier.create_classifier('language', 'Python', version) for version in supported_version])
     base.extend([Classifier.create_classifier('language', 'Python', 'Implementation', impl) for impl in implementation])
@@ -112,6 +112,7 @@ _BASE_DEPENDENCIES = [
     Dependencies(name='bentoml', extensions=_BENTOML_EXT, lower_constraint=lower_bentoml_constraint),
     Dependencies(name='transformers', extensions=_TRANSFORMERS_EXT, lower_constraint='4.32.1'),
     Dependencies(name='openllm-client'),
+    Dependencies(name='openllm-core'),
     Dependencies(name='safetensors'),
     Dependencies(name='optimum', lower_constraint="1.12.0"),
     Dependencies(name='accelerate'),
@@ -132,7 +133,7 @@ AGENTS_DEPS = ['transformers[agents]>=4.30', 'diffusers', 'soundfile']
 PLAYGROUND_DEPS = ['jupyter', 'notebook', 'ipython', 'jupytext', 'nbformat']
 GGML_DEPS = ['ctransformers']
 GPTQ_DEPS = ['auto-gptq[triton]>=0.4.2', 'optimum>=1.12.0']
-VLLM_DEPS = ['vllm>=0.1.4', 'ray']
+VLLM_DEPS = ['vllm>=0.1.7', 'ray']
 
 _base_requirements: dict[str, t.Any] = {
     inflection.dasherize(name): config_cls.__openllm_requirements__ for name, config_cls in openllm.CONFIG_MAPPING.items() if config_cls.__openllm_requirements__

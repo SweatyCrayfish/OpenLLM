@@ -41,6 +41,7 @@ dependencies = [
     "bentoml[io]>=1.1.2",
     "transformers[torch,tokenizers,accelerate]>=4.32.1",
     "openllm-client",
+    "openllm-core",
     "safetensors",
     "optimum>=1.12.0",
     "accelerate",
@@ -108,13 +109,13 @@ full = [
 ggml = ["ctransformers"]
 gptq = ["auto-gptq[triton]>=0.4.2", "optimum>=1.12.0"]
 grpc = ["openllm-client[grpc]"]
-llama = ["fairscale", "sentencepiece"]
+llama = ["fairscale", "sentencepiece", "scipy"]
 mpt = ["triton", "einops"]
 openai = ["openai", "tiktoken"]
 opt = ["flax>=0.7", "jax", "jaxlib", "tensorflow", "keras"]
 playground = ["jupyter", "notebook", "ipython", "jupytext", "nbformat"]
 starcoder = ["bitsandbytes"]
-vllm = ["vllm>=0.1.4", "ray"]
+vllm = ["vllm>=0.1.7", "ray"]
 
 [tool.hatch.version]
 fallback-version = "0.0.0"

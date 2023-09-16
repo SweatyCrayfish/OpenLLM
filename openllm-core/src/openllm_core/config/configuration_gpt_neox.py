@@ -19,7 +19,7 @@ Currently, GPTNeoX only supports PyTorch. Make sure ``torch`` is available in yo
 
 \b
 GPTNeoX Runner will use EleutherAI/gpt-neox-20b as the default model. To change to any other GPTNeoX
-saved pretrained, or a fine-tune GPTNeoX, provide ``OPENLLM_GPT_NEOX_MODEL_ID='stabilityai/stablelm-tuned-alpha-3b'``
+saved pretrained, or a fine-tune GPTNeoX, provide ``OPENLLM_MODEL_ID='stabilityai/stablelm-tuned-alpha-3b'``
 or provide `--model-id` flag when running ``openllm start gpt-neox``:
 
 \b
@@ -45,7 +45,6 @@ class GPTNeoXConfig(openllm_core.LLMConfig):
   __config__ = {
       'model_name': 'gpt_neox',
       'start_name': 'gpt-neox',
-      'requires_gpu': True,
       'architecture': 'GPTNeoXForCausalLM',
       'url': 'https://github.com/EleutherAI/gpt-neox',
       'default_id': 'eleutherai/gpt-neox-20b',

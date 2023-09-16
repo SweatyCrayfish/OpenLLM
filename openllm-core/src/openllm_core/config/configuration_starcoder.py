@@ -16,7 +16,7 @@ Currently, StarCoder only supports PyTorch. Make sure ``torch`` is available in 
 
 \b
 StarCoder Runner will use bigcode/starcoder as the default model. To change to any other StarCoder
-saved pretrained, or a fine-tune StarCoder, provide ``OPENLLM_STARCODER_MODEL_ID='bigcode/starcoder'``
+saved pretrained, or a fine-tune StarCoder, provide ``OPENLLM_MODEL_ID='bigcode/starcoder'``
 or provide `--model-id` flag when running ``openllm start starcoder``:
 
 \b
@@ -36,11 +36,9 @@ class StarCoderConfig(openllm_core.LLMConfig):
   """
   __config__ = {
       'name_type': 'lowercase',
-      'requires_gpu': True,
       'url': 'https://github.com/bigcode-project/starcoder',
       'architecture': 'GPTBigCodeForCausalLM',
       'requirements': ['bitsandbytes'],
-      'workers_per_resource': 0.5,
       'default_id': 'bigcode/starcoder',
       'model_ids': ['bigcode/starcoder', 'bigcode/starcoderbase']
   }

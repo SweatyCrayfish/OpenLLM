@@ -20,7 +20,7 @@ Note that if you use vLLM, a NVIDIA GPU is required.
 
 \b
 FalconLM Runner will use tiiuae/falcon-7b as the default model. To change to any other FalconLM
-saved pretrained, or a fine-tune FalconLM, provide ``OPENLLM_FALCON_MODEL_ID='tiiuae/falcon-7b-instruct'``
+saved pretrained, or a fine-tune FalconLM, provide ``OPENLLM_MODEL_ID='tiiuae/falcon-7b-instruct'``
 or provide `--model-id` flag when running ``openllm start falcon``:
 
 \b
@@ -41,7 +41,6 @@ class FalconConfig(openllm_core.LLMConfig):
   __config__ = {
       'name_type': 'lowercase',
       'trust_remote_code': True,
-      'requires_gpu': True,
       'timeout': int(36e6),
       'url': 'https://falconllm.tii.ae/',
       'requirements': ['einops', 'xformers'],

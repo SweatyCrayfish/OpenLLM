@@ -3,22 +3,22 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - "main"
+      - 'main'
     tags:
-      - "*"
+      - '*'
     paths:
-      - ".github/workflows/build-embedding.yml"
-      - "openllm-python/src/openllm/**"
-      - "openllm-core/src/openllm_core/**"
-      - "openllm-client/src/openllm_client/**"
+      - '.github/workflows/build-embedding.yml'
+      - 'openllm-python/src/openllm/**'
+      - 'openllm-core/src/openllm_core/**'
+      - 'openllm-client/src/openllm_client/**'
   pull_request:
     branches:
-      - "main"
+      - 'main'
     paths:
-      - ".github/workflows/build-embedding.yml"
-      - "openllm-python/src/openllm/**"
-      - "openllm-core/src/openllm_core/**"
-      - "openllm-client/src/openllm_client/**"
+      - '.github/workflows/build-embedding.yml'
+      - 'openllm-python/src/openllm/**'
+      - 'openllm-core/src/openllm_core/**'
+      - 'openllm-client/src/openllm_client/**'
     types: [labeled, opened, synchronize, reopened]
 # https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#defaultsrun
 defaults:
@@ -43,7 +43,7 @@ jobs:
     outputs:
       message: ${{ steps.commit_message.outputs.message }}
     steps:
-      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # ratchet:actions/checkout@v3
+      - uses: actions/checkout@3df4ab11eba7bda6032a0b82a6bb43b11571feac # ratchet:actions/checkout@v4
         # Gets the correct commit message for pull request
         with:
           ref: ${{ github.event.pull_request.head.sha }}
@@ -70,7 +70,7 @@ jobs:
       ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
     steps:
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@04b98b3f9e85f563fb061be8751a0352327246b0 # ratchet:aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@8c3f20df09ac63af7b3ae3d7c91f105f857d8497 # ratchet:aws-actions/configure-aws-credentials@v4.0.0
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -98,19 +98,19 @@ jobs:
       id-token: write
       security-events: write
     steps:
-      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # ratchet:actions/checkout@v3
+      - uses: actions/checkout@3df4ab11eba7bda6032a0b82a6bb43b11571feac # ratchet:actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: bentoml/setup-bentoml-action@d4010d8303684b183f45b33c6a44644f81337bdb # ratchet:bentoml/setup-bentoml-action@v1
+      - uses: bentoml/setup-bentoml-action@862aa8fa0e0c3793fcca4bfe7a62717a497417e4 # ratchet:bentoml/setup-bentoml-action@v1
         with:
           bentoml-version: 'main'
           python-version: '3.11'
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@102b1a064a9b145e56556e22b18b19c624538d94 # ratchet:rlespinasse/github-slug-action@v4.4.1
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@2b82ce82d56a2a04d2637cd93a637ae1b359c0a7 # ratchet:docker/setup-qemu-action@v2.2.0
+        uses: docker/setup-qemu-action@68827325e0b33c7199eb31dd4e31fbe9023e06e3 # ratchet:docker/setup-qemu-action@v3.0.0
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@885d1462b80bc1c1c7f0b00334ad271f09369c55 # ratchet:docker/setup-buildx-action@v2.10.0
+        uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 # ratchet:docker/setup-buildx-action@v3.0.0
         with:
           install: true
           driver-opts: |
@@ -122,7 +122,7 @@ jobs:
         with:
           cosign-release: 'v2.1.1'
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc # ratchet:docker/login-action@v2.2.0
+        uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d # ratchet:docker/login-action@v3.0.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -130,7 +130,7 @@ jobs:
       - name: Extract metadata tags and labels on PRs
         if: github.event_name == 'pull_request'
         id: meta-pr
-        uses: docker/metadata-action@818d4b7b91585d195f67373fd9cb0332e31a7175 # ratchet:docker/metadata-action@v4.6.0
+        uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934 # ratchet:docker/metadata-action@v5.0.0
         with:
           images: ghcr.io/bentoml/openllm-embedding
           tags: |
@@ -138,7 +138,7 @@ jobs:
       - name: Extract metadata tags and labels for main, release or tag
         if: github.event_name != 'pull_request'
         id: meta
-        uses: docker/metadata-action@818d4b7b91585d195f67373fd9cb0332e31a7175 # ratchet:docker/metadata-action@v4.6.0
+        uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934 # ratchet:docker/metadata-action@v5.0.0
         with:
           flavor: latest=auto
           images: ghcr.io/bentoml/openllm-embedding
@@ -151,6 +151,7 @@ jobs:
         id: bento-tag
         run: |
           bash local.sh
+          pip install 'build[virtualenv]==0.10.0'
           openllm build opt --serialisation legacy --bento-version sha-${{ env.GITHUB_SHA_SHORT }} --machine --dockerfile-template - <<EOF
             {% extends "python_debian.j2" %}
             {% block SETUP_BENTO_BASE_IMAGE %}
@@ -170,7 +171,7 @@ jobs:
                     ca-certificates gnupg2 bash build-essential {% if __options__system_packages is not none %}{{ __options__system_packages | join(' ') }}{% endif -%}
             {% endblock %}
           EOF
-          bento_tag=$(python -c "import openllm;print(str(openllm.build('opt',bento_version='sha-${{ env.GITHUB_SHA_SHORT }}',serialisation_format='legacy').tag))")
+          bento_tag=$(python -c "import openllm;print(str(openllm.build('opt',bento_version='sha-${{ env.GITHUB_SHA_SHORT }}',serialisation='legacy').tag))")
           echo "tag=$bento_tag" >> $GITHUB_OUTPUT
       - name: Build and push Embedding Bento
         id: build-and-push
@@ -187,7 +188,7 @@ jobs:
       - name: Sign the released image
         if: ${{ github.event_name != 'pull_request' }}
         env:
-          COSIGN_EXPERIMENTAL: "true"
+          COSIGN_EXPERIMENTAL: 'true'
         run: echo "${{ steps.meta.outputs.tags }}" | xargs -I {} cosign sign --yes {}@${{ steps.build-and-push.outputs.digest }}
       - name: Run Trivy in GitHub SBOM mode and submit results to Dependency Graph
         uses: aquasecurity/trivy-action@fbd16365eb88e12433951383f5e99bd901fc618f # ratchet:aquasecurity/trivy-action@master
@@ -223,7 +224,7 @@ jobs:
       (contains(needs.get_commit_message.outputs.message, '[ec2 build]') || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, '00 - EC2 Build')) || (github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/main')))) && always()
     steps:
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@04b98b3f9e85f563fb061be8751a0352327246b0 # ratchet:aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@8c3f20df09ac63af7b3ae3d7c91f105f857d8497 # ratchet:aws-actions/configure-aws-credentials@v4.0.0
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
